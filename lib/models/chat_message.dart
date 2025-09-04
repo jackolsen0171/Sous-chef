@@ -2,6 +2,8 @@ enum MessageType {
   user,
   bot,
   system,
+  toolCall,
+  toolResult,
 }
 
 enum MessageStatus {
@@ -9,6 +11,9 @@ enum MessageStatus {
   sent,
   delivered,
   error,
+  executing,
+  success,
+  failed,
 }
 
 class ChatMessage {
@@ -88,6 +93,43 @@ class ChatMessage {
       content: content,
       type: MessageType.bot,
       metadata: metadata,
+    );
+  }
+
+  static ChatMessage toolCallMessage({
+    required String toolName,
+    required Map<String, dynamic> parameters,
+    MessageStatus status = MessageStatus.executing,
+  }) {
+    return ChatMessage(
+      content: toolName,
+      type: MessageType.toolCall,
+      status: status,
+      metadata: {
+        'toolName': toolName,
+        'parameters': parameters,
+        'startTime': DateTime.now().toIso8601String(),
+      },
+    );
+  }
+
+  static ChatMessage toolResultMessage({
+    required String toolName,
+    required dynamic result,
+    required bool success,
+    String? errorMessage,
+  }) {
+    return ChatMessage(
+      content: toolName,
+      type: MessageType.toolResult,
+      status: success ? MessageStatus.success : MessageStatus.failed,
+      metadata: {
+        'toolName': toolName,
+        'result': result,
+        'success': success,
+        'errorMessage': errorMessage,
+        'endTime': DateTime.now().toIso8601String(),
+      },
     );
   }
 }

@@ -1,12 +1,17 @@
 import 'package:flutter/foundation.dart';
 import '../models/chat_message.dart';
 import '../models/ingredient.dart';
+import '../models/ai_tool.dart';
 import '../services/chatbot_service.dart';
 import '../services/logger_service.dart';
+import '../services/tool_registry.dart';
+import '../services/tool_executor.dart';
+import 'inventory_provider.dart';
 
 class ChatProvider extends ChangeNotifier {
   final ChatbotService _chatbotService = ChatbotService.instance;
   final LoggerService _logger = LoggerService.instance;
+  final ToolRegistry _toolRegistry = ToolRegistry.instance;
   
   List<ChatMessage> _messages = [];
   final bool _isLoading = false;
@@ -37,6 +42,53 @@ class ChatProvider extends ChangeNotifier {
       });
       notifyListeners();
     }
+  }
+
+  void initializeTools(InventoryProvider inventoryProvider) {
+    _toolRegistry.registerInventoryTools(inventoryProvider);
+    _logger.log(LogLevel.info, 'ChatProvider', 'Inventory tools registered');
+    
+    // Set up tool status update callback
+    ToolExecutor.instance.onToolStatusUpdate = (toolName, parameters, status) {
+      _addToolStatusMessage(toolName, parameters, status);
+    };
+  }
+  
+  void _addToolStatusMessage(String toolName, Map<String, dynamic> parameters, String status) {
+    if (status == 'executing') {
+      // Add tool call message
+      final toolCallMessage = ChatMessage.toolCallMessage(
+        toolName: toolName,
+        parameters: parameters,
+        status: MessageStatus.executing,
+      );
+      _messages.add(toolCallMessage);
+    } else {
+      // Find the corresponding tool call message and add result
+      for (int i = _messages.length - 1; i >= 0; i--) {
+        if (_messages[i].type == MessageType.toolCall &&
+            _messages[i].metadata?['toolName'] == toolName &&
+            _messages[i].status == MessageStatus.executing) {
+          // Update the tool call message status
+          _messages[i] = _messages[i].copyWith(
+            status: status == 'success' ? MessageStatus.success : MessageStatus.failed,
+          );
+          
+          // Add tool result message
+          final toolResultMessage = ChatMessage.toolResultMessage(
+            toolName: toolName,
+            result: status == 'success' 
+              ? 'Operation completed successfully' 
+              : 'Operation failed',
+            success: status == 'success',
+            errorMessage: status == 'failed' ? 'Tool execution failed' : null,
+          );
+          _messages.add(toolResultMessage);
+          break;
+        }
+      }
+    }
+    notifyListeners();
   }
 
   void _startNewSession() {

@@ -4,7 +4,6 @@ import '../models/recipe.dart';
 import '../providers/recipe_provider.dart';
 import '../providers/inventory_provider.dart';
 import '../widgets/recipe_card.dart';
-import '../widgets/chatbot_widget.dart';
 
 class RecipesScreen extends StatefulWidget {
   const RecipesScreen({Key? key}) : super(key: key);
@@ -20,7 +19,7 @@ class _RecipesScreenState extends State<RecipesScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _updateRecipeMatches();
@@ -49,7 +48,6 @@ class _RecipesScreenState extends State<RecipesScreen>
           controller: _tabController,
           isScrollable: true,
           tabs: const [
-            Tab(icon: Icon(Icons.chat_bubble_outline), text: 'Chat Assistant'),
             Tab(text: 'Can Make'),
             Tab(text: 'Almost Ready'),
             Tab(text: 'All Recipes'),
@@ -69,7 +67,6 @@ class _RecipesScreenState extends State<RecipesScreen>
           return TabBarView(
             controller: _tabController,
             children: [
-              _buildChatbotTab(),
               _buildCanMakeTab(recipeProvider),
               _buildAlmostReadyTab(recipeProvider),
               _buildAllRecipesTab(recipeProvider),
@@ -78,10 +75,6 @@ class _RecipesScreenState extends State<RecipesScreen>
         },
       ),
     );
-  }
-
-  Widget _buildChatbotTab() {
-    return const ChatbotWidget();
   }
 
   Widget _buildCanMakeTab(RecipeProvider provider) {

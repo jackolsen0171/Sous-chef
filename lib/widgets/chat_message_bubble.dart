@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/chat_message.dart';
+import 'tool_call_bubble.dart';
 
 class ChatMessageBubble extends StatelessWidget {
   final ChatMessage message;
@@ -23,6 +24,12 @@ class ChatMessageBubble extends StatelessWidget {
         return _buildBotMessage(context);
       case MessageType.system:
         return _buildSystemMessage(context);
+      case MessageType.toolCall:
+      case MessageType.toolResult:
+        return ToolCallBubble(
+          message: message,
+          onRetry: onRetry,
+        );
     }
   }
 
@@ -260,6 +267,10 @@ class ChatMessageBubble extends StatelessWidget {
           size: 12,
           color: Colors.red.shade300,
         );
+      case MessageStatus.executing:
+      case MessageStatus.success:
+      case MessageStatus.failed:
+        return const SizedBox.shrink();
     }
   }
 

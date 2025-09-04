@@ -17,13 +17,17 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _focusNode = FocusNode();
-  bool _isContextPanelExpanded = false;
+  bool _isContextPanelExpanded = true;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollToBottom();
+      // Initialize tools with inventory provider
+      final inventoryProvider = context.read<InventoryProvider>();
+      final chatProvider = context.read<ChatProvider>();
+      chatProvider.initializeTools(inventoryProvider);
     });
   }
 
@@ -53,6 +57,7 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
     context.read<ChatProvider>().sendMessage(message, inventory);
     
     _messageController.clear();
+    FocusScope.of(context).unfocus(); // Dismiss keyboard after sending
     
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollToBottom();
@@ -71,14 +76,30 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return Consumer2<ChatProvider, InventoryProvider>(
-      builder: (context, chatProvider, inventoryProvider, child) {
-        final messages = chatProvider.messages;
-        final ingredients = inventoryProvider.ingredients;
-        final quickReplies = chatProvider.getQuickReplySuggestions(ingredients);
+    return GestureDetector(
+      onTap: () {
+        // Dismiss keyboard when tapping outside of text field
+        FocusScope.of(context).unfocus();
+      },
+      child: Consumer2<ChatProvider, InventoryProvider>(
+        builder: (context, chatProvider, inventoryProvider, child) {
+          final messages = chatProvider.messages;
+          final ingredients = inventoryProvider.ingredients;
+          final quickReplies = chatProvider.getQuickReplySuggestions(ingredients);
 
-        return Column(
-          children: [
+          return Column(
+            children: [
+            // Ingredient context panel at the top
+            IngredientContextPanel(
+              ingredients: ingredients,
+              isExpanded: _isContextPanelExpanded,
+              onToggle: () {
+                setState(() {
+                  _isContextPanelExpanded = !_isContextPanelExpanded;
+                });
+              },
+            ),
+            
             // Error banner
             if (chatProvider.error != null)
               _buildErrorBanner(context, chatProvider),
@@ -122,23 +143,12 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
             if (!chatProvider.isTyping && quickReplies.isNotEmpty)
               _buildQuickReplies(quickReplies),
 
-            // Ingredient context panel
-            IngredientContextPanel(
-              ingredients: ingredients,
-              isExpanded: _isContextPanelExpanded,
-              onToggle: () {
-                setState(() {
-                  _isContextPanelExpanded = !_isContextPanelExpanded;
-                });
-              },
-              onIngredientTap: _sendQuickReply,
-            ),
-
             // Input field
             _buildInputField(context, chatProvider),
           ],
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
@@ -282,7 +292,13 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
                       ),
                       maxLines: null,
                       textCapitalization: TextCapitalization.sentences,
+                      keyboardType: TextInputType.text,
+                      textInputAction: TextInputAction.send,
                       onSubmitted: (_) => _sendMessage(),
+                      onEditingComplete: () {
+                        _sendMessage();
+                        FocusScope.of(context).unfocus();
+                      },
                     ),
                   ),
                   PopupMenuButton<String>(
@@ -308,6 +324,16 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
                           ],
                         ),
                       ),
+                      PopupMenuItem(
+                        value: 'debug_tools',
+                        child: const Row(
+                          children: [
+                            Icon(Icons.bug_report, size: 20),
+                            SizedBox(width: 8),
+                            Text('Debug Tools'),
+                          ],
+                        ),
+                      ),
                     ],
                     onSelected: (value) {
                       switch (value) {
@@ -316,6 +342,15 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
                           break;
                         case 'help':
                           _sendQuickReply('What can you help me with?');
+                          break;
+                        case 'debug_tools':
+                          // Debug tools removed - tools are now managed internally
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('AI tools are active and managed automatically'),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
                           break;
                       }
                     },
@@ -369,4 +404,5 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
       ),
     );
   }
+
 }

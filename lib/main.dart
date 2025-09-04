@@ -6,6 +6,7 @@ import 'providers/recipe_provider.dart';
 import 'providers/chat_provider.dart';
 import 'screens/add_ingredient_screen.dart';
 import 'screens/inventory_screen.dart';
+import 'screens/ai_chef_screen.dart';
 import 'screens/recipes_screen.dart';
 import 'screens/logs_screen.dart';
 import 'services/logger_service.dart';
@@ -69,6 +70,7 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _screens = [
     const InventoryScreen(),
+    const AIChefScreen(),
     const RecipesScreen(),
     const AddIngredientScreen(),
     const LogsScreen(),
@@ -100,6 +102,10 @@ class _MainScreenState extends State<MainScreen> {
             label: 'Inventory',
           ),
           BottomNavigationBarItem(
+            icon: Icon(Icons.restaurant),
+            label: 'AI Chef',
+          ),
+          BottomNavigationBarItem(
             icon: Icon(Icons.restaurant_menu),
             label: 'Recipes',
           ),
@@ -117,7 +123,7 @@ class _MainScreenState extends State<MainScreen> {
           ? FloatingActionButton(
               onPressed: () {
                 setState(() {
-                  _selectedIndex = 2;
+                  _selectedIndex = 3;
                 });
               },
               tooltip: 'Add Ingredient',

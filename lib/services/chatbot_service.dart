@@ -2,7 +2,10 @@ import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../models/ingredient.dart';
 import '../models/chat_message.dart';
+import '../models/ai_tool.dart';
 import 'logger_service.dart';
+import 'tool_registry.dart';
+import 'tool_executor.dart';
 
 class ChatbotService {
   static final ChatbotService instance = ChatbotService._init();
@@ -11,6 +14,8 @@ class ChatbotService {
 
   GenerativeModel? _model;
   final LoggerService _logger = LoggerService.instance;
+  final ToolRegistry _toolRegistry = ToolRegistry.instance;
+  final ToolExecutor _toolExecutor = ToolExecutor.instance;
   List<ChatMessage> _conversationHistory = [];
 
   Future<void> initialize() async {
@@ -49,6 +54,10 @@ class ChatbotService {
   }
 
   String _getSystemInstruction() {
+    final toolSchemas = _toolRegistry.getToolSchemas();
+    final toolDescriptions = toolSchemas.map((schema) => 
+      '- ${schema['name']}: ${schema['description']}').join('\n');
+
     return '''
 You are Sous Chef, a friendly and knowledgeable cooking assistant. Your role is to help users with cooking, recipes, and meal planning based on their available ingredients.
 
@@ -65,6 +74,21 @@ CAPABILITIES:
 - Meal planning advice
 - Dietary restriction accommodations
 - Food safety guidance
+- Inventory management through tools
+
+INVENTORY MANAGEMENT TOOLS:
+You have access to these tools to help manage the user's ingredient inventory:
+$toolDescriptions
+
+TOOL USAGE:
+- When users ask to add, remove, update, or list ingredients, you MUST use the appropriate tools
+- Be explicit about tool usage with clear action statements like:
+  * "I'll add 5 eggs to your inventory now."
+  * "Let me add 2 cups of rice to your pantry."
+  * "I'm removing the expired milk from your inventory."
+- Always confirm successful tool actions with a friendly message
+- For destructive actions (like deleting ingredients), the system will handle confirmation
+- Use natural language - you don't need to show JSON or technical details
 
 RESPONSE STYLE:
 - Keep responses conversational and helpful
@@ -72,8 +96,9 @@ RESPONSE STYLE:
 - Mention ingredient availability from their inventory
 - Suggest using ingredients that are expiring soon
 - Ask clarifying questions when needed
+- When using tools, explain what you're doing in friendly terms
 
-Remember: You have access to the user's current ingredient inventory with quantities, units, and expiry dates. Always consider this context in your responses.
+Remember: You have access to the user's current ingredient inventory with quantities, units, and expiry dates. Always consider this context in your responses. When users mention adding, removing, or managing ingredients, use the available tools to help them.
 ''';
   }
 
@@ -101,19 +126,38 @@ Remember: You have access to the user's current ingredient inventory with quanti
         throw Exception('No response from AI model');
       }
 
+      // Check for tool calls in the response
+      final toolCalls = _toolExecutor.parseToolCallsFromResponse(response.text!);
+      String finalResponse = response.text!;
+      final toolResults = <ToolResult>[];
+
+      if (toolCalls.isNotEmpty) {
+        await _logger.log(LogLevel.info, 'Chatbot', 'Found ${toolCalls.length} tool calls in response');
+        
+        // Execute tool calls
+        final results = await _toolExecutor.executeToolCalls(toolCalls);
+        toolResults.addAll(results);
+        
+        // Build enhanced response with tool results
+        finalResponse = _buildResponseWithToolResults(response.text!, toolResults);
+      }
+
       final botMessage = ChatMessage.botMessage(
-        response.text!,
+        finalResponse,
         metadata: {
           'inventory_used': currentInventory.map((i) => i.name).toList(),
           'response_time': DateTime.now().toIso8601String(),
+          'tool_calls': toolCalls.map((tc) => tc.toJson()).toList(),
+          'tool_results': toolResults.map((tr) => tr.toJson()).toList(),
         },
       );
       
       _conversationHistory.add(botMessage);
       
       await _logger.log(LogLevel.info, 'Chatbot', 'Successfully generated response', {
-        'response_length': response.text!.length,
+        'response_length': finalResponse.length,
         'conversation_length': _conversationHistory.length,
+        'tool_calls_executed': toolCalls.length,
       });
 
       return botMessage;
@@ -128,6 +172,57 @@ Remember: You have access to the user's current ingredient inventory with quanti
         metadata: {'error': true, 'error_message': e.toString()},
       );
     }
+  }
+
+  String _buildResponseWithToolResults(String originalResponse, List<ToolResult> toolResults) {
+    if (toolResults.isEmpty) return originalResponse;
+    
+    final successfulResults = toolResults.where((r) => r.success).toList();
+    final failedResults = toolResults.where((r) => !r.success).toList();
+    
+    final responseBuffer = StringBuffer();
+    
+    // Add successful tool results
+    if (successfulResults.isNotEmpty) {
+      for (final result in successfulResults) {
+        responseBuffer.writeln(result.message);
+      }
+      responseBuffer.writeln();
+    }
+    
+    // Add failed tool results
+    if (failedResults.isNotEmpty) {
+      responseBuffer.writeln("I encountered some issues:");
+      for (final result in failedResults) {
+        responseBuffer.writeln("• ${result.message}");
+      }
+      responseBuffer.writeln();
+    }
+    
+    // Add the original AI response, but clean it up if it contains tool-specific language
+    String cleanedResponse = originalResponse;
+    
+    // Remove common tool-related phrases that might confuse users
+    final toolPhrases = [
+      r"I'll (add|remove|update|delete)",
+      r"Let me (add|remove|update|delete)",
+      r"Adding.*to.*inventory",
+      r"Removing.*from.*inventory",
+      r"I'm (adding|removing|updating|deleting)",
+    ];
+    
+    for (final phrase in toolPhrases) {
+      cleanedResponse = cleanedResponse.replaceAll(RegExp(phrase, caseSensitive: false), '');
+    }
+    
+    // Clean up extra whitespace
+    cleanedResponse = cleanedResponse.replaceAll(RegExp(r'\n\s*\n'), '\n').trim();
+    
+    if (cleanedResponse.isNotEmpty) {
+      responseBuffer.write(cleanedResponse);
+    }
+    
+    return responseBuffer.toString().trim();
   }
 
   String _buildConversationalPrompt(String userMessage, List<Ingredient> inventory) {
