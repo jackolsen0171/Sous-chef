@@ -7,6 +7,7 @@ class AIChefScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: Colors.red,
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
