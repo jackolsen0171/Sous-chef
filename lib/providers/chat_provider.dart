@@ -49,12 +49,12 @@ class ChatProvider extends ChangeNotifier {
     _logger.log(LogLevel.info, 'ChatProvider', 'Inventory tools registered');
     
     // Set up tool status update callback
-    ToolExecutor.instance.onToolStatusUpdate = (toolName, parameters, status) {
-      _addToolStatusMessage(toolName, parameters, status);
+    ToolExecutor.instance.onToolStatusUpdate = (toolName, parameters, status, result) {
+      _addToolStatusMessage(toolName, parameters, status, result);
     };
   }
   
-  void _addToolStatusMessage(String toolName, Map<String, dynamic> parameters, String status) {
+  void _addToolStatusMessage(String toolName, Map<String, dynamic> parameters, String status, ToolResult? result) {
     if (status == 'executing') {
       // Add tool call message
       final toolCallMessage = ChatMessage.toolCallMessage(
@@ -74,14 +74,14 @@ class ChatProvider extends ChangeNotifier {
             status: status == 'success' ? MessageStatus.success : MessageStatus.failed,
           );
           
-          // Add tool result message
+          // Add tool result message with the actual result message
           final toolResultMessage = ChatMessage.toolResultMessage(
             toolName: toolName,
-            result: status == 'success' 
+            result: result?.message ?? (status == 'success' 
               ? 'Operation completed successfully' 
-              : 'Operation failed',
+              : 'Operation failed'),
             success: status == 'success',
-            errorMessage: status == 'failed' ? 'Tool execution failed' : null,
+            errorMessage: status == 'failed' ? result?.error : null,
           );
           _messages.add(toolResultMessage);
           break;

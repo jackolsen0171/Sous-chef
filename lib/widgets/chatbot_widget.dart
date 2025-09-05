@@ -86,6 +86,13 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
           final messages = chatProvider.messages;
           final ingredients = inventoryProvider.ingredients;
           final quickReplies = chatProvider.getQuickReplySuggestions(ingredients);
+          
+          // Auto-scroll when new messages arrive
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (_scrollController.hasClients) {
+              _scrollToBottom();
+            }
+          });
 
           return Column(
             children: [

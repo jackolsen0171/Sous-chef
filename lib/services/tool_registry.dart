@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../models/ai_tool.dart';
 import '../models/ingredient.dart';
 import '../providers/inventory_provider.dart';
@@ -54,6 +56,22 @@ class ToolRegistry {
         ),
       },
       executor: (toolCall) => _addIngredient(toolCall, inventoryProvider),
+    ));
+
+    // Add multiple ingredients at once
+    registerTool(AITool(
+      name: 'add_ingredients_batch',
+      description: 'Add multiple ingredients to inventory at once',
+      category: 'inventory',
+      parameters: {
+        'ingredients': ParameterSchema(
+          name: 'ingredients',
+          type: ParameterType.string,
+          description: 'JSON array of ingredients with name, quantity, unit, category (optional), and expiry_date (optional)',
+          required: true,
+        ),
+      },
+      executor: (toolCall) => _addIngredientsBatch(toolCall, inventoryProvider),
     ));
 
     // Update ingredient quantity tool
@@ -237,6 +255,198 @@ class ToolRegistry {
     }
   }
 
+  Future<ToolResult> _addIngredientsBatch(ToolCall toolCall, InventoryProvider inventoryProvider) async {
+    try {
+      final params = toolCall.parameters;
+      final ingredientsParam = params['ingredients'];
+      
+      // Parse JSON string to List
+      late List<dynamic> ingredientsList;
+      try {
+        if (ingredientsParam is String) {
+          // Parse JSON string
+          final decoded = jsonDecode(ingredientsParam);
+          if (decoded is List) {
+            ingredientsList = decoded;
+          } else if (decoded is Map) {
+            // Single ingredient passed as object
+            ingredientsList = [decoded];
+          } else {
+            throw FormatException('Invalid format');
+          }
+        } else if (ingredientsParam is List) {
+          // Already a list
+          ingredientsList = ingredientsParam;
+        } else {
+          throw FormatException('Ingredients must be a JSON string or list');
+        }
+      } catch (e) {
+        return ToolResult.error(
+          toolCallId: toolCall.id,
+          message: 'Invalid JSON format for ingredients. Expected JSON array of ingredient objects.',
+          error: 'JSON parsing failed: $e',
+        );
+      }
+
+      // Process each ingredient
+      final results = <Map<String, dynamic>>[];
+      int successCount = 0;
+      int failCount = 0;
+
+      for (final ingredientData in ingredientsList) {
+        try {
+          final ingredientMap = Map<String, dynamic>.from(ingredientData);
+          
+          // Extract and parse ingredient data
+          String name = ingredientMap['name']?.toString() ?? '';
+          double quantity = _parseQuantity(ingredientMap['quantity']);
+          String unit = ingredientMap['unit']?.toString() ?? 'pieces';
+          String category = ingredientMap['category']?.toString() ?? _inferCategory(name);
+          String? expiryDateStr = ingredientMap['expiry_date']?.toString();
+
+          // Validate required fields
+          if (name.isEmpty) {
+            results.add({
+              'name': 'Unknown',
+              'success': false,
+              'message': 'Missing ingredient name',
+            });
+            failCount++;
+            continue;
+          }
+
+          // Parse expiry date
+          DateTime? expiryDate;
+          if (expiryDateStr != null && expiryDateStr.isNotEmpty) {
+            expiryDate = DateTime.tryParse(expiryDateStr);
+          }
+
+          // Create ingredient
+          final ingredient = Ingredient(
+            name: name,
+            quantity: quantity,
+            unit: unit,
+            category: category,
+            expiryDate: expiryDate,
+          );
+
+          // Add to inventory
+          final success = await inventoryProvider.addIngredient(ingredient);
+          
+          if (success) {
+            results.add({
+              'name': name,
+              'success': true,
+              'message': 'Added $quantity $unit of $name',
+            });
+            successCount++;
+          } else {
+            results.add({
+              'name': name,
+              'success': false,
+              'message': inventoryProvider.error ?? 'Failed to add',
+            });
+            failCount++;
+          }
+        } catch (e) {
+          results.add({
+            'name': ingredientData['name'] ?? 'Unknown',
+            'success': false,
+            'message': 'Error: $e',
+          });
+          failCount++;
+        }
+      }
+
+      // Build summary message
+      String message = '';
+      if (successCount > 0 && failCount == 0) {
+        message = '✅ Successfully added $successCount ingredient${successCount > 1 ? 's' : ''} to inventory!';
+      } else if (successCount > 0 && failCount > 0) {
+        message = '⚠️ Added $successCount ingredient${successCount > 1 ? 's' : ''}, $failCount failed.';
+      } else {
+        message = '❌ Failed to add ingredients to inventory.';
+      }
+
+      // Add details for each result
+      if (results.isNotEmpty) {
+        message += '\n\nDetails:';
+        for (final result in results) {
+          final icon = result['success'] ? '✅' : '❌';
+          message += '\n$icon ${result['name']}: ${result['message']}';
+        }
+      }
+
+      return ToolResult(
+        toolCallId: toolCall.id,
+        success: successCount > 0,
+        message: message,
+        data: {
+          'results': results,
+          'summary': {
+            'total': ingredientsList.length,
+            'succeeded': successCount,
+            'failed': failCount,
+          },
+        },
+      );
+    } catch (e) {
+      return ToolResult.error(
+        toolCallId: toolCall.id,
+        message: 'Error processing batch ingredients: $e',
+        error: e.toString(),
+      );
+    }
+  }
+
+  double _parseQuantity(dynamic value) {
+    if (value == null) return 1.0;
+    if (value is num) return value.toDouble();
+    if (value is String) {
+      final parsed = double.tryParse(value);
+      if (parsed != null) return parsed;
+      // Handle cases like "some" or empty
+      return 1.0;
+    }
+    return 1.0;
+  }
+
+  String _inferCategory(String name) {
+    final nameLower = name.toLowerCase();
+    
+    // Meat & Seafood
+    if (RegExp(r'\b(chicken|beef|pork|lamb|turkey|bacon|ham|sausage|meat|steak|fish|salmon|tuna|shrimp|seafood)\b')
+        .hasMatch(nameLower)) {
+      return IngredientCategory.meat;
+    }
+    
+    // Dairy
+    if (RegExp(r'\b(milk|cheese|yogurt|butter|cream|dairy|egg)\b')
+        .hasMatch(nameLower)) {
+      return IngredientCategory.dairy;
+    }
+    
+    // Produce
+    if (RegExp(r'\b(apple|banana|orange|lemon|lime|grape|berry|fruit|vegetable|carrot|potato|onion|tomato|lettuce|spinach|broccoli|pepper|cucumber|celery)\b')
+        .hasMatch(nameLower)) {
+      return IngredientCategory.produce;
+    }
+    
+    // Spices
+    if (RegExp(r'\b(salt|pepper|spice|herb|garlic|ginger|cinnamon|cumin|paprika|oregano|basil|thyme|rosemary)\b')
+        .hasMatch(nameLower)) {
+      return IngredientCategory.spices;
+    }
+    
+    // Pantry
+    if (RegExp(r'\b(rice|pasta|flour|sugar|oil|vinegar|sauce|can|jar|bread|cereal|oat|bean|lentil)\b')
+        .hasMatch(nameLower)) {
+      return IngredientCategory.pantry;
+    }
+    
+    return IngredientCategory.other;
+  }
+
   Future<ToolResult> _updateIngredientQuantity(ToolCall toolCall, InventoryProvider inventoryProvider) async {
     try {
       final params = toolCall.parameters;
@@ -284,15 +494,35 @@ class ToolRegistry {
       final params = toolCall.parameters;
       final name = params['name'] as String;
 
-      // Find ingredient by name
-      final ingredient = inventoryProvider.ingredients
-          .where((i) => i.name.toLowerCase() == name.toLowerCase())
+      // Clean the input name (remove common phrases)
+      final cleanedName = _cleanDeleteInputName(name);
+
+      // Find ingredient by exact name first
+      Ingredient? ingredient = inventoryProvider.ingredients
+          .where((i) => i.name.toLowerCase() == cleanedName.toLowerCase())
           .firstOrNull;
 
+      // If not found, try fuzzy matching
       if (ingredient == null) {
+        ingredient = _findBestMatchingIngredient(cleanedName, inventoryProvider.ingredients);
+      }
+
+      if (ingredient == null) {
+        // Show available ingredients
+        final availableIngredients = inventoryProvider.ingredients
+            .map((i) => i.name)
+            .toList();
+        
+        if (availableIngredients.isEmpty) {
+          return ToolResult.error(
+            toolCallId: toolCall.id,
+            message: 'No ingredients found in inventory to delete',
+          );
+        }
+
         return ToolResult.error(
           toolCallId: toolCall.id,
-          message: 'Ingredient "$name" not found in inventory',
+          message: 'Ingredient "$cleanedName" not found in inventory.\n\nAvailable ingredients:\n${availableIngredients.map((name) => '• $name').join('\n')}',
         );
       }
 
@@ -301,7 +531,7 @@ class ToolRegistry {
       if (success) {
         return ToolResult.success(
           toolCallId: toolCall.id,
-          message: '✅ Removed $name from your inventory',
+          message: '✅ Removed "${ingredient.name}" from your inventory',
           data: {'deleted_ingredient': ingredient.toMap()},
         );
       } else {
@@ -318,6 +548,73 @@ class ToolRegistry {
         error: e.toString(),
       );
     }
+  }
+
+  String _cleanDeleteInputName(String input) {
+    // Remove common phrases that shouldn't be part of ingredient names
+    String cleaned = input.toLowerCase();
+    
+    final phrasesToRemove = [
+      r'\bfrom your inventory\b',
+      r'\bfrom inventory\b', 
+      r'\bfrom my inventory\b',
+      r'\bfrom the inventory\b',
+      r'\bin inventory\b',
+      r'\bin my inventory\b',
+      r'\bin your inventory\b',
+      r'\ball\s+',
+      r'\bthe\s+',
+      r'\bmy\s+',
+      r'\byour\s+',
+    ];
+    
+    for (final phrase in phrasesToRemove) {
+      cleaned = cleaned.replaceAll(RegExp(phrase), '');
+    }
+    
+    return cleaned.trim();
+  }
+
+  Ingredient? _findBestMatchingIngredient(String searchName, List<Ingredient> ingredients) {
+    if (ingredients.isEmpty) return null;
+    
+    final searchLower = searchName.toLowerCase();
+    
+    // Try partial matches
+    for (final ingredient in ingredients) {
+      final ingredientLower = ingredient.name.toLowerCase();
+      
+      // Check if search term is contained in ingredient name
+      if (ingredientLower.contains(searchLower)) {
+        return ingredient;
+      }
+      
+      // Check if ingredient name is contained in search term
+      if (searchLower.contains(ingredientLower)) {
+        return ingredient;
+      }
+    }
+    
+    // Try word-by-word matching
+    final searchWords = searchLower.split(' ');
+    for (final ingredient in ingredients) {
+      final ingredientWords = ingredient.name.toLowerCase().split(' ');
+      
+      // Check if any search word matches any ingredient word
+      for (final searchWord in searchWords) {
+        if (searchWord.length > 2) { // Only consider meaningful words
+          for (final ingredientWord in ingredientWords) {
+            if (searchWord == ingredientWord || 
+                searchWord.contains(ingredientWord) || 
+                ingredientWord.contains(searchWord)) {
+              return ingredient;
+            }
+          }
+        }
+      }
+    }
+    
+    return null;
   }
 
   Future<ToolResult> _searchIngredients(ToolCall toolCall, InventoryProvider inventoryProvider) async {

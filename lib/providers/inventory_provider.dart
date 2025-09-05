@@ -129,4 +129,25 @@ class InventoryProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<bool> clearAllIngredients() async {
+    try {
+      // Delete all ingredients from database
+      for (final ingredient in _ingredients) {
+        if (ingredient.id != null) {
+          await _db.deleteIngredient(ingredient.id!);
+        }
+      }
+      
+      // Clear the local list
+      _ingredients.clear();
+      _error = null;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = 'Failed to clear inventory: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
 }

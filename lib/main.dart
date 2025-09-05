@@ -8,7 +8,6 @@ import 'screens/add_ingredient_screen.dart';
 import 'screens/inventory_screen.dart';
 import 'screens/ai_chef_screen.dart';
 import 'screens/recipes_screen.dart';
-import 'screens/logs_screen.dart';
 import 'services/logger_service.dart';
 
 void main() async {
@@ -73,7 +72,6 @@ class _MainScreenState extends State<MainScreen> {
     const AIChefScreen(),
     const RecipesScreen(),
     const AddIngredientScreen(),
-    const LogsScreen(),
   ];
 
 
@@ -112,10 +110,6 @@ class _MainScreenState extends State<MainScreen> {
           BottomNavigationBarItem(
             icon: Icon(Icons.add_circle),
             label: 'Add',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.bug_report),
-            label: 'Logs',
           ),
         ],
       ),

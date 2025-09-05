@@ -63,6 +63,60 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
+  void _showClearInventoryDialog(BuildContext context, InventoryProvider provider) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Clear Inventory'),
+          content: Text(
+            'Are you sure you want to delete all ${provider.ingredients.length} ingredient${provider.ingredients.length == 1 ? '' : 's'} from your inventory?\n\nThis action cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                
+                // Show loading indicator
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (context) => const Center(
+                    child: CircularProgressIndicator(),
+                  ),
+                );
+                
+                // Clear all ingredients
+                await provider.clearAllIngredients();
+                
+                // Hide loading indicator
+                if (context.mounted) {
+                  Navigator.pop(context);
+                  
+                  // Show success message
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Inventory cleared successfully'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+              ),
+              child: const Text('Clear All'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   void _deleteIngredient(Ingredient ingredient) {
     showDialog(
       context: context,
@@ -103,6 +157,20 @@ class _InventoryScreenState extends State<InventoryScreen> {
       appBar: AppBar(
         title: const Text('My Inventory'),
         elevation: 0,
+        actions: [
+          Consumer<InventoryProvider>(
+            builder: (context, provider, child) {
+              if (!provider.hasIngredients) {
+                return const SizedBox.shrink();
+              }
+              return IconButton(
+                icon: const Icon(Icons.delete_sweep),
+                tooltip: 'Clear Inventory',
+                onPressed: () => _showClearInventoryDialog(context, provider),
+              );
+            },
+          ),
+        ],
       ),
       body: Column(
         children: [
