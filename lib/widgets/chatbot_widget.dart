@@ -7,7 +7,8 @@ import 'chat_message_bubble.dart';
 import 'ingredient_context_panel.dart';
 
 class ChatbotWidget extends StatefulWidget {
-  const ChatbotWidget({Key? key}) : super(key: key);
+  final VoidCallback? onClose;
+  const ChatbotWidget({Key? key, this.onClose}) : super(key: key);
 
   @override
   State<ChatbotWidget> createState() => _ChatbotWidgetState();
@@ -17,7 +18,7 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _focusNode = FocusNode();
-  bool _isContextPanelExpanded = true;
+  bool _isContextPanelExpanded = false;
 
   @override
   void initState() {
@@ -55,10 +56,10 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
 
     final inventory = context.read<InventoryProvider>().ingredients;
     context.read<ChatProvider>().sendMessage(message, inventory);
-    
+
     _messageController.clear();
     FocusScope.of(context).unfocus(); // Dismiss keyboard after sending
-    
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollToBottom();
     });
@@ -85,8 +86,10 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
         builder: (context, chatProvider, inventoryProvider, child) {
           final messages = chatProvider.messages;
           final ingredients = inventoryProvider.ingredients;
-          final quickReplies = chatProvider.getQuickReplySuggestions(ingredients);
-          
+          final quickReplies = chatProvider.getQuickReplySuggestions(
+            ingredients,
+          );
+
           // Auto-scroll when new messages arrive
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (_scrollController.hasClients) {
@@ -94,65 +97,107 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
             }
           });
 
-          return Column(
+          return Stack(
+            clipBehavior: Clip.none,
             children: [
-            // Ingredient context panel at the top
-            IngredientContextPanel(
-              ingredients: ingredients,
-              isExpanded: _isContextPanelExpanded,
-              onToggle: () {
-                setState(() {
-                  _isContextPanelExpanded = !_isContextPanelExpanded;
-                });
-              },
-            ),
-            
-            // Error banner
-            if (chatProvider.error != null)
-              _buildErrorBanner(context, chatProvider),
-            
-            // Chat messages
-            Expanded(
-              child: Stack(
+              // Main chat content
+              Column(
                 children: [
-                  ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.only(bottom: 80),
-                    itemCount: messages.length,
-                    itemBuilder: (context, index) {
-                      final message = messages[index];
-                      final showAvatar = index == 0 || 
-                          messages[index - 1].type != message.type;
-                      
-                      return ChatMessageBubble(
-                        message: message,
-                        showAvatar: showAvatar,
-                        onRetry: message.type == MessageType.user && 
-                                message.status == MessageStatus.error
-                            ? _retryLastMessage
-                            : null,
-                      );
+                  // Ingredient context panel at the top
+                  IngredientContextPanel(
+                    ingredients: ingredients,
+                    isExpanded: _isContextPanelExpanded,
+                    onToggle: () {
+                      setState(() {
+                        _isContextPanelExpanded = !_isContextPanelExpanded;
+                      });
                     },
                   ),
-                  
-                  // Typing indicator
-                  if (chatProvider.isTyping)
-                    Positioned(
-                      bottom: 20,
-                      left: 16,
-                      child: _buildTypingIndicator(),
+
+                  // Error banner
+                  if (chatProvider.error != null)
+                    _buildErrorBanner(context, chatProvider),
+
+                  // Chat messages
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.only(bottom: 80),
+                          itemCount: messages.length,
+                          itemBuilder: (context, index) {
+                            final message = messages[index];
+                            final showAvatar =
+                                index == 0 ||
+                                messages[index - 1].type != message.type;
+
+                            return ChatMessageBubble(
+                              message: message,
+                              showAvatar: showAvatar,
+                              onRetry:
+                                  message.type == MessageType.user &&
+                                      message.status == MessageStatus.error
+                                  ? _retryLastMessage
+                                  : null,
+                            );
+                          },
+                        ),
+
+                        // Typing indicator
+                        if (chatProvider.isTyping)
+                          Positioned(
+                            bottom: 20,
+                            left: 16,
+                            child: _buildTypingIndicator(),
+                          ),
+                      ],
                     ),
+                  ),
+
+                  // Quick replies
+                  if (!chatProvider.isTyping && quickReplies.isNotEmpty)
+                    _buildQuickReplies(quickReplies),
+
+                  // Input field
+                  _buildInputField(context, chatProvider),
                 ],
               ),
-            ),
 
-            // Quick replies
-            if (!chatProvider.isTyping && quickReplies.isNotEmpty)
-              _buildQuickReplies(quickReplies),
-
-            // Input field
-            _buildInputField(context, chatProvider),
-          ],
+              // Close button positioned at the bottom of the input area
+              if (widget.onClose != null)
+                Positioned(
+                  bottom: 8, // Position within the input area
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: GestureDetector(
+                      onTap: widget.onClose,
+                      child: Container(
+                        width: 60,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: Theme.of(
+                            context,
+                          ).primaryColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Theme.of(
+                              context,
+                            ).primaryColor.withOpacity(0.3),
+                            width: 1,
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.keyboard_arrow_down,
+                          color: Theme.of(context).primaryColor,
+                          size: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           );
         },
       ),
@@ -171,20 +216,14 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
           Expanded(
             child: Text(
               chatProvider.error!,
-              style: TextStyle(
-                color: Colors.red.shade700,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.red.shade700, fontSize: 12),
             ),
           ),
           TextButton(
             onPressed: chatProvider.clearError,
             child: Text(
               'Dismiss',
-              style: TextStyle(
-                color: Colors.red.shade600,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: Colors.red.shade600, fontSize: 12),
             ),
           ),
         ],
@@ -269,11 +308,14 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).scaffoldBackgroundColor,
-        border: Border(
-          top: BorderSide(color: Colors.grey.shade200),
-        ),
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
       ),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      padding: const EdgeInsets.fromLTRB(
+        16,
+        8,
+        16,
+        40,
+      ), // Extra bottom padding for close button
       child: Row(
         children: [
           Expanded(
@@ -290,7 +332,8 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
                       controller: _messageController,
                       focusNode: _focusNode,
                       decoration: const InputDecoration(
-                        hintText: 'Ask about recipes, ingredients, or cooking tips...',
+                        hintText:
+                            'Ask about recipes, ingredients, or cooking tips...',
                         border: InputBorder.none,
                         contentPadding: EdgeInsets.symmetric(
                           horizontal: 16,
@@ -354,7 +397,9 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
                           // Debug tools removed - tools are now managed internally
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text('AI tools are active and managed automatically'),
+                              content: Text(
+                                'AI tools are active and managed automatically',
+                              ),
                               duration: Duration(seconds: 2),
                             ),
                           );
@@ -411,5 +456,4 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
       ),
     );
   }
-
 }

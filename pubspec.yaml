@@ -51,6 +51,12 @@ dependencies:
   # File system & logging
   path_provider: ^2.1.4
   intl: ^0.19.0
+  
+  # Graph visualization
+  graphview: ^1.2.0
+  
+  # Markdown rendering
+  flutter_markdown: ^0.7.3
 
 dev_dependencies:
   flutter_test:

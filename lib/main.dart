@@ -8,6 +8,7 @@ import 'screens/add_ingredient_screen.dart';
 import 'screens/inventory_screen.dart';
 import 'screens/ai_chef_screen.dart';
 import 'screens/recipes_screen.dart';
+import 'screens/recipe_tree_screen.dart';
 import 'services/logger_service.dart';
 
 void main() async {
@@ -69,9 +70,7 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _screens = [
     const InventoryScreen(),
-    const AIChefScreen(),
-    const RecipesScreen(),
-    const AddIngredientScreen(),
+    const RecipeTreeScreen(),
   ];
 
 
@@ -89,7 +88,6 @@ class _MainScreenState extends State<MainScreen> {
         children: _screens,
       ),
       bottomNavigationBar: BottomNavigationBar(
-        type: BottomNavigationBarType.fixed,
         currentIndex: _selectedIndex,
         onTap: _onItemTapped,
         selectedItemColor: Theme.of(context).primaryColor,
@@ -100,30 +98,11 @@ class _MainScreenState extends State<MainScreen> {
             label: 'Inventory',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.restaurant),
-            label: 'AI Chef',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.restaurant_menu),
+            icon: Icon(Icons.account_tree),
             label: 'Recipes',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.add_circle),
-            label: 'Add',
           ),
         ],
       ),
-      floatingActionButton: _selectedIndex == 0
-          ? FloatingActionButton(
-              onPressed: () {
-                setState(() {
-                  _selectedIndex = 3;
-                });
-              },
-              tooltip: 'Add Ingredient',
-              child: const Icon(Icons.add),
-            )
-          : null,
     );
   }
 }

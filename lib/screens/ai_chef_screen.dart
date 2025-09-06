@@ -4,7 +4,8 @@ import '../widgets/chatbot_widget.dart';
 import '../providers/chat_provider.dart';
 
 class AIChefScreen extends StatelessWidget {
-  const AIChefScreen({Key? key}) : super(key: key);
+  final VoidCallback? onClose;
+  const AIChefScreen({Key? key, this.onClose}) : super(key: key);
 
   void _showClearChatDialog(BuildContext context, ChatProvider chatProvider) {
     showDialog(
@@ -33,33 +34,35 @@ class AIChefScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: const [
-            Icon(Icons.restaurant, size: 24),
-            SizedBox(width: 8),
-            Text('AI Chef Assistant'),
-          ],
-        ),
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: Theme.of(context).primaryColor,
-        foregroundColor: Colors.white,
-        actions: [
-          Consumer<ChatProvider>(
-            builder: (context, chatProvider, child) {
-              return IconButton(
-                icon: const Icon(Icons.clear_all),
-                tooltip: 'Clear Chat',
-                onPressed: () => _showClearChatDialog(context, chatProvider),
-              );
-            },
+    return Column(
+      children: [
+        // Menu actions in a subtle bar
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
           ),
-        ],
-      ),
-      body: const ChatbotWidget(),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Consumer<ChatProvider>(
+                builder: (context, chatProvider, child) {
+                  return IconButton(
+                    icon: const Icon(Icons.clear_all),
+                    tooltip: 'Clear Chat',
+                    onPressed: () => _showClearChatDialog(context, chatProvider),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        // Chat content
+        Expanded(
+          child: ChatbotWidget(onClose: onClose),
+        ),
+      ],
     );
   }
 }
