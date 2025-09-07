@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'logger_service.dart';
 import '../models/ingredient.dart';
 import '../models/ai_tool.dart';
@@ -13,6 +14,25 @@ class ToolRegistry {
 
   void registerInventoryTools(InventoryProvider inventoryProvider) {
     _logger.log(LogLevel.info, 'ToolRegistry', 'Registering simplified inventory tools');
+
+    // JSON import tool for bulk testing/POC
+    final importJsonTool = {
+      "type": "function",
+      "function": {
+        "name": "import_ingredients_json",
+        "description": "Import pre-formatted JSON array of ingredients for bulk testing",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "json_data": {
+              "type": "string",
+              "description": "JSON string containing ingredients array"
+            }
+          },
+          "required": ["json_data"]
+        }
+      }
+    };
 
     // Single add_ingredient tool with batch support (OpenAI native format)
     final addIngredientTool = {
@@ -70,6 +90,9 @@ class ToolRegistry {
 
     _openAITools['add_ingredient'] = addIngredientTool;
     _executors['add_ingredient'] = (ToolCall toolCall) => _addIngredients(toolCall, inventoryProvider);
+    
+    _openAITools['import_ingredients_json'] = importJsonTool;
+    _executors['import_ingredients_json'] = (ToolCall toolCall) => _importIngredientsJson(toolCall, inventoryProvider);
 
     _logger.log(LogLevel.info, 'ToolRegistry', 'Registered ${_openAITools.length} inventory tools');
   }
@@ -238,6 +261,123 @@ class ToolRegistry {
       return ToolResult.error(
         toolCallId: toolCall.id,
         message: 'Error processing ingredients: $e',
+        error: e.toString(),
+      );
+    }
+  }
+
+  // JSON import tool executor
+  Future<ToolResult> _importIngredientsJson(ToolCall toolCall, InventoryProvider inventoryProvider) async {
+    try {
+      final jsonString = toolCall.parameters['json_data'] as String?;
+      
+      if (jsonString == null || jsonString.isEmpty) {
+        return ToolResult.error(
+          toolCallId: toolCall.id,
+          message: 'No JSON data provided',
+        );
+      }
+
+      // Parse the JSON
+      final dynamic parsed = jsonDecode(jsonString);
+      List<dynamic> ingredientsList;
+      
+      // Handle both direct array and object with "ingredients" key
+      if (parsed is List) {
+        ingredientsList = parsed;
+      } else if (parsed is Map && parsed['ingredients'] is List) {
+        ingredientsList = parsed['ingredients'];
+      } else {
+        return ToolResult.error(
+          toolCallId: toolCall.id,
+          message: 'Invalid JSON format. Expected array or object with "ingredients" array',
+        );
+      }
+
+      final List<Ingredient> ingredientsToAdd = [];
+      final List<String> errors = [];
+      
+      // Process each ingredient from JSON
+      for (int i = 0; i < ingredientsList.length; i++) {
+        try {
+          final item = ingredientsList[i] as Map<String, dynamic>;
+          
+          final ingredient = Ingredient(
+            name: item['name'] as String,
+            quantity: (item['quantity'] as num).toDouble(),
+            unit: item['unit'] as String,
+            category: item['category'] as String? ?? 'Other',
+            emoji: item['emoji'] as String? ?? '🍽️',
+            categoryEmoji: item['categoryEmoji'] as String? ?? '📦',
+          );
+          
+          ingredientsToAdd.add(ingredient);
+        } catch (e) {
+          errors.add('Item ${i + 1}: $e');
+        }
+      }
+
+      if (ingredientsToAdd.isEmpty) {
+        return ToolResult.error(
+          toolCallId: toolCall.id,
+          message: 'No valid ingredients found in JSON. Errors: ${errors.join(', ')}',
+        );
+      }
+
+      // Add all valid ingredients
+      int successCount = 0;
+      final Map<String, List<String>> byCategory = {};
+      
+      for (final ingredient in ingredientsToAdd) {
+        final success = await inventoryProvider.addIngredient(ingredient);
+        if (success) {
+          successCount++;
+          byCategory.putIfAbsent(ingredient.category, () => [])
+            .add('${ingredient.quantity} ${ingredient.unit} ${ingredient.name}');
+        } else {
+          errors.add('Failed to add ${ingredient.name}');
+        }
+      }
+
+      if (successCount > 0) {
+        String message = '✅ Imported $successCount ingredients from JSON:\n\n';
+        
+        // Group by category for nice output
+        for (final category in byCategory.keys.toList()..sort()) {
+          final items = byCategory[category]!;
+          final categoryEmoji = ingredientsToAdd
+              .firstWhere((i) => i.category == category)
+              .categoryEmoji;
+          message += '$categoryEmoji $category (${items.length} items)\n';
+          for (final item in items) {
+            message += '  • $item\n';
+          }
+          message += '\n';
+        }
+        
+        if (errors.isNotEmpty) {
+          message += '\n⚠️ Some items had issues: ${errors.join(', ')}';
+        }
+        
+        return ToolResult.success(
+          toolCallId: toolCall.id,
+          message: message.trim(),
+          data: {
+            'imported_count': successCount,
+            'total_count': ingredientsList.length,
+            'categories': byCategory.keys.toList(),
+          },
+        );
+      } else {
+        return ToolResult.error(
+          toolCallId: toolCall.id,
+          message: 'Failed to import any ingredients. Errors: ${errors.join(', ')}',
+        );
+      }
+    } catch (e) {
+      return ToolResult.error(
+        toolCallId: toolCall.id,
+        message: 'JSON parsing error: $e',
         error: e.toString(),
       );
     }
