@@ -6,6 +6,7 @@ import '../services/chatbot_service.dart';
 import '../services/logger_service.dart';
 import '../services/tool_registry.dart';
 import '../services/tool_executor.dart';
+import '../services/ingredient_list_parser.dart';
 import 'inventory_provider.dart';
 
 class ChatProvider extends ChangeNotifier {
@@ -18,6 +19,7 @@ class ChatProvider extends ChangeNotifier {
   bool _isTyping = false;
   String? _error;
   ChatSession? _currentSession;
+  bool _toolsInitialized = false;
 
   List<ChatMessage> get messages => List.unmodifiable(_messages);
   bool get isLoading => _isLoading;
@@ -25,6 +27,9 @@ class ChatProvider extends ChangeNotifier {
   String? get error => _error;
   ChatSession? get currentSession => _currentSession;
   bool get hasMessages => _messages.isNotEmpty;
+  String get currentProvider => _chatbotService.currentProviderName;
+  String get currentModel => _chatbotService.currentModel;
+  bool get isOpenRouterAvailable => _chatbotService.isOpenRouterAvailable;
 
   ChatProvider() {
     _initializeChat();
@@ -52,7 +57,13 @@ class ChatProvider extends ChangeNotifier {
   }
 
   void initializeTools(InventoryProvider inventoryProvider) {
+    if (_toolsInitialized) {
+      _logger.log(LogLevel.debug, 'ChatProvider', 'Tools already initialized, skipping...');
+      return;
+    }
+    
     _toolRegistry.registerInventoryTools(inventoryProvider);
+    _toolsInitialized = true;
     _logger.log(LogLevel.info, 'ChatProvider', 'Inventory tools registered');
 
     // Set up tool status update callback
@@ -138,8 +149,19 @@ class ChatProvider extends ChangeNotifier {
             'inventory_count': currentInventory.length,
           });
 
+      // Check if this looks like a multi-line ingredient list
+      String processedContent = content.trim();
+      if (_isIngredientList(content)) {
+        processedContent = await _processIngredientList(content);
+        await _logger.log(
+          LogLevel.info,
+          'ChatProvider',
+          'Detected and processed ingredient list',
+        );
+      }
+
       final botResponse = await _chatbotService.sendMessage(
-        content.trim(),
+        processedContent,
         currentInventory,
       );
 
@@ -257,9 +279,92 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
+  // Model switching method
+  void switchModel({String? model}) {
+    _chatbotService.switchModel(model: model);
+    notifyListeners();
+  }
   @override
   void dispose() {
     _chatbotService.dispose();
     super.dispose();
+  }
+
+  /// Checks if the message appears to be a multi-line ingredient list
+  bool _isIngredientList(String content) {
+    // Check for multiple lines
+    final lines = content.split('\n').where((l) => l.trim().isNotEmpty).toList();
+    if (lines.length < 3) return false;
+    
+    // Check for category headers (##) or multiple ingredient-like lines
+    bool hasCategories = lines.any((line) => line.trim().startsWith('##'));
+    
+    // Check if most lines look like ingredients (short, no sentences)
+    int ingredientLikeLines = 0;
+    for (final line in lines) {
+      final trimmed = line.trim();
+      // Skip headers and separators
+      if (trimmed.startsWith('#') || trimmed.startsWith('-') || 
+          trimmed.startsWith('=') || trimmed.contains('[*]')) {
+        continue;
+      }
+      // Ingredient-like: short (under 30 chars), no periods (not sentences)
+      if (trimmed.length < 30 && !trimmed.contains('.')) {
+        ingredientLikeLines++;
+      }
+    }
+    
+    // If we have categories or most lines look like ingredients, it's probably a list
+    return hasCategories || (ingredientLikeLines >= lines.length * 0.5);
+  }
+
+  /// Processes a multi-line ingredient list into a format the AI can handle better
+  Future<String> _processIngredientList(String content) async {
+    final parser = IngredientListParser.instance;
+    final ingredients = parser.parseIngredientList(content);
+    
+    if (ingredients.isEmpty) {
+      // Couldn't parse, return original
+      return content;
+    }
+    
+    // Group ingredients by category
+    final Map<String, List<String>> categorized = {};
+    for (final ingredient in ingredients) {
+      categorized.putIfAbsent(ingredient.category, () => []);
+      String item = ingredient.name;
+      if (ingredient.quantity != 1.0 || ingredient.unit != 'pieces') {
+        item = '${ingredient.quantity} ${ingredient.unit} ${ingredient.name}';
+      }
+      categorized[ingredient.category]!.add(item);
+    }
+    
+    // Build a cleaner message for the AI
+    final buffer = StringBuffer();
+    buffer.writeln('Please add these ingredients to my inventory:');
+    buffer.writeln();
+    
+    for (final entry in categorized.entries) {
+      buffer.writeln('${entry.key}:');
+      for (final item in entry.value) {
+        buffer.writeln('- $item');
+      }
+      buffer.writeln();
+    }
+    
+    buffer.writeln('Total: ${ingredients.length} ingredients');
+    
+    await _logger.log(
+      LogLevel.info,
+      'ChatProvider',
+      'Processed ingredient list',
+      {
+        'original_length': content.length,
+        'ingredient_count': ingredients.length,
+        'categories': categorized.keys.toList(),
+      },
+    );
+    
+    return buffer.toString();
   }
 }

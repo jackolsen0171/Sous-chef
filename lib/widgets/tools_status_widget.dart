@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../services/tool_registry.dart';
-import '../models/ai_tool.dart';
 
 class ToolsStatusWidget extends StatelessWidget {
   final bool isExpanded;
@@ -16,7 +15,7 @@ class ToolsStatusWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final toolRegistry = ToolRegistry.instance;
     final allTools = toolRegistry.getAllTools();
-    final inventoryTools = toolRegistry.getToolsByCategory('inventory');
+    final inventoryTools = allTools; // All tools are now inventory tools
 
     return Container(
       decoration: BoxDecoration(
@@ -118,7 +117,7 @@ class ToolsStatusWidget extends StatelessWidget {
     );
   }
 
-  Widget _buildToolsList(BuildContext context, List<AITool> tools) {
+  Widget _buildToolsList(BuildContext context, List<Map<String, dynamic>> tools) {
     if (tools.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(16),
@@ -144,7 +143,7 @@ class ToolsStatusWidget extends StatelessWidget {
     );
   }
 
-  Widget _buildToolItem(BuildContext context, AITool tool) {
+  Widget _buildToolItem(BuildContext context, Map<String, dynamic> tool) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Row(
@@ -153,14 +152,14 @@ class ToolsStatusWidget extends StatelessWidget {
             width: 24,
             height: 24,
             decoration: BoxDecoration(
-              color: _getCategoryColor(tool.category).withOpacity(0.1),
+              color: _getCategoryColor('inventory').withOpacity(0.1),
               borderRadius: BorderRadius.circular(4),
             ),
             child: Center(
               child: Icon(
-                _getCategoryIcon(tool.category),
+                _getCategoryIcon('inventory'),
                 size: 14,
-                color: _getCategoryColor(tool.category),
+                color: _getCategoryColor('inventory'),
               ),
             ),
           ),
@@ -173,33 +172,18 @@ class ToolsStatusWidget extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        tool.name.replaceAll('_', ' ').toUpperCase(),
+                        (tool['function']?['name'] ?? 'Unknown Tool').toString().replaceAll('_', ' ').toUpperCase(),
                         style: const TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                     ),
-                    if (tool.requiresConfirmation)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.shade100,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          'CONFIRM',
-                          style: TextStyle(
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.orange.shade700,
-                          ),
-                        ),
-                      ),
+                    // No confirmation flag in new format
                   ],
                 ),
                 Text(
-                  tool.description,
+                  tool['function']?['description'] ?? 'No description available',
                   style: TextStyle(
                     fontSize: 10,
                     color: Colors.grey.shade600,
@@ -217,7 +201,7 @@ class ToolsStatusWidget extends StatelessWidget {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              '${tool.parameters.length}',
+              '${(tool['function']?['parameters']?['properties'] as Map<String, dynamic>?)?.length ?? 0}',
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.bold,
@@ -325,7 +309,7 @@ class ToolsDebugSheet extends StatelessWidget {
                     children: [
                       _buildSummaryCard(allTools),
                       const SizedBox(height: 16),
-                      _buildToolsList(allTools),
+                      _buildDebugToolsList(allTools),
                       const SizedBox(height: 16),
                       _buildSchemasSection(toolSchemas),
                     ],
@@ -339,9 +323,9 @@ class ToolsDebugSheet extends StatelessWidget {
     );
   }
 
-  Widget _buildSummaryCard(List<AITool> tools) {
-    final inventoryTools = tools.where((t) => t.category == 'inventory').length;
-    final confirmedTools = tools.where((t) => t.requiresConfirmation).length;
+  Widget _buildSummaryCard(List<Map<String, dynamic>> tools) {
+    final inventoryTools = tools.length; // All tools are inventory tools
+    final confirmedTools = 0; // No confirmation in new format
     
     return Card(
       child: Padding(
@@ -399,7 +383,7 @@ class ToolsDebugSheet extends StatelessWidget {
     );
   }
 
-  Widget _buildToolsList(List<AITool> tools) {
+  Widget _buildDebugToolsList(List<Map<String, dynamic>> tools) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -426,12 +410,12 @@ class ToolsDebugSheet extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      tool.name,
+                      tool['function']?['name'] ?? 'Unknown Tool',
                       style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
                     ),
                   ),
                   Text(
-                    '${tool.parameters.length} params',
+                    '${(tool['function']?['parameters']?['properties'] as Map<String, dynamic>?)?.length ?? 0} params',
                     style: TextStyle(
                       fontSize: 10,
                       color: Colors.grey.shade600,
@@ -466,7 +450,7 @@ class ToolsDebugSheet extends StatelessWidget {
                 border: Border.all(color: Colors.grey.shade300),
               ),
               child: Text(
-                schemas.map((schema) => '• ${schema['name']}: ${schema['description']}').join('\n'),
+                schemas.map((schema) => '• ${schema['function']?['name'] ?? 'Unknown'}: ${schema['function']?['description'] ?? 'No description'}').join('\n'),
                 style: const TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 11,

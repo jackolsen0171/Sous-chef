@@ -5,6 +5,7 @@ import '../providers/chat_provider.dart';
 import '../providers/inventory_provider.dart';
 import 'chat_message_bubble.dart';
 import 'ingredient_context_panel.dart';
+import 'model_selector_widget.dart';
 
 class ChatbotWidget extends StatefulWidget {
   final VoidCallback? onClose;
@@ -351,6 +352,9 @@ class _ChatbotWidgetState extends State<ChatbotWidget> {
                       },
                     ),
                   ),
+                  // Model selector
+                  const ModelSelectorWidget(),
+                  const SizedBox(width: 8),
                   PopupMenuButton<String>(
                     icon: Icon(Icons.more_vert, color: Colors.grey.shade600),
                     itemBuilder: (context) => [

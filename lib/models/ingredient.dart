@@ -4,6 +4,8 @@ class Ingredient {
   final double quantity;
   final String unit;
   final String category;
+  final String emoji; // Emoji for the ingredient
+  final String categoryEmoji; // Emoji for the category
   final DateTime? expiryDate;
   final DateTime createdAt;
 
@@ -13,6 +15,8 @@ class Ingredient {
     required this.quantity,
     required this.unit,
     required this.category,
+    this.emoji = '🍽️',
+    this.categoryEmoji = '📦',
     this.expiryDate,
     DateTime? createdAt,
   }) : createdAt = createdAt ?? DateTime.now();
@@ -24,6 +28,8 @@ class Ingredient {
       'quantity': quantity,
       'unit': unit,
       'category': category,
+      'emoji': emoji,
+      'categoryEmoji': categoryEmoji,
       'expiryDate': expiryDate?.toIso8601String(),
       'createdAt': createdAt.toIso8601String(),
     };
@@ -36,6 +42,8 @@ class Ingredient {
       quantity: map['quantity'].toDouble(),
       unit: map['unit'],
       category: map['category'],
+      emoji: map['emoji'] ?? '🍽️', // Default if not found
+      categoryEmoji: map['categoryEmoji'] ?? '📦', // Default if not found
       expiryDate: map['expiryDate'] != null 
           ? DateTime.parse(map['expiryDate']) 
           : null,
@@ -49,6 +57,8 @@ class Ingredient {
     double? quantity,
     String? unit,
     String? category,
+    String? emoji,
+    String? categoryEmoji,
     DateTime? expiryDate,
     DateTime? createdAt,
   }) {
@@ -58,6 +68,8 @@ class Ingredient {
       quantity: quantity ?? this.quantity,
       unit: unit ?? this.unit,
       category: category ?? this.category,
+      emoji: emoji ?? this.emoji,
+      categoryEmoji: categoryEmoji ?? this.categoryEmoji,
       expiryDate: expiryDate ?? this.expiryDate,
       createdAt: createdAt ?? this.createdAt,
     );

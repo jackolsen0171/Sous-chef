@@ -1,4 +1,4 @@
-import 'package:google_generative_ai/google_generative_ai.dart';
+import 'dart:convert';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../models/ingredient.dart';
 import '../models/chat_message.dart';
@@ -6,16 +6,21 @@ import '../models/ai_tool.dart';
 import 'logger_service.dart';
 import 'tool_registry.dart';
 import 'tool_executor.dart';
+import 'openrouter_service.dart';
 
 class ChatbotService {
   static final ChatbotService instance = ChatbotService._init();
 
   ChatbotService._init();
 
-  GenerativeModel? _model;
   final LoggerService _logger = LoggerService.instance;
   final ToolRegistry _toolRegistry = ToolRegistry.instance;
   final ToolExecutor _toolExecutor = ToolExecutor.instance;
+  final OpenRouterService _openRouterService = OpenRouterService();
+
+  String get currentProviderName => 'openRouter';
+  String get currentModel => _openRouterService.currentModel;
+  bool get isOpenRouterAvailable => _openRouterService.isInitialized;
   List<ChatMessage> _conversationHistory = [];
 
   Future<void> initialize() async {
@@ -38,30 +43,14 @@ class ChatbotService {
       });
     }
 
-    final apiKey = dotenv.env['GOOGLE_AI_API_KEY'];
-    await _logger.log(LogLevel.debug, 'Chatbot', 'API key check', {
-      'has_api_key': apiKey != null,
-      'api_key_length': apiKey?.length ?? 0,
-    });
-
-    if (apiKey == null || apiKey.isEmpty || apiKey == 'your_api_key_here') {
-      await _logger.log(LogLevel.error, 'Chatbot', 'No valid API key found');
-      throw Exception(
-        'Google AI API key not found. Please add GOOGLE_AI_API_KEY to your .env file',
-      );
-    }
-
-    await _logger.log(LogLevel.info, 'Chatbot', 'API key loaded successfully');
-
-    _model = GenerativeModel(
-      model: 'gemini-1.5-flash',
-      apiKey: apiKey,
-      generationConfig: GenerationConfig(
-        temperature: 0.8,
-        topP: 0.9,
-        maxOutputTokens: 1024,
-      ),
-      systemInstruction: Content.text(_getSystemInstruction()),
+    await _logger.log(
+      LogLevel.info,
+      'Chatbot',
+      'Chatbot service initialized - using OpenRouter for all models',
+      {
+        'openrouter_available': _openRouterService.isInitialized,
+        'current_model': _openRouterService.currentModel,
+      },
     );
   }
 
@@ -94,14 +83,15 @@ You have access to these tools to help manage the user's ingredient inventory:
 $toolDescriptions
 
 IMPORTANT BATCH TOOL USAGE:
-- When the user mentions multiple ingredients they want added to their inventory, you MUST use the add_ingredients_batch tool
-- add_ingredients_batch is specifically designed to add multiple ingredients at once efficiently
-- Never call add_ingredient multiple times in a row - always use add_ingredients_batch for 2+ items
-- Examples that MUST use add_ingredients_batch:
-  * "Add apples, bananas, and oranges"
-  * "I bought 1 apple, 1 banana, 3 oranges"
-  * "Put chicken and bacon in my inventory"
-  * Any request with 2 or more ingredients
+- When the user mentions multiple ingredients they want added to their inventory, you MUST use the add_ingredient tool with batch format
+- For categorized lists (with headers like "Spices:", "Produce:", etc.), follow the user's structure EXACTLY
+- Create separate categories as the user intended, don't lump everything together
+- Examples:
+  * User says "Vinegars: Balsamic, Red wine" → Create "Vinegars" category with those items
+  * User says "Asian sauces: Soy sauce, Mirin" → Create "Asian Sauces" category  
+  * User says "Oils: Sesame oil, Olive oil" → Create "Oils" category
+- For very large lists (15+ items), process them in batches of 10-12 items
+- Never call add_ingredient multiple times - always use the batch format for 2+ items
 
 VALID UNITS AND CATEGORIES:
 When adding ingredients, you MUST use only these valid units:
@@ -109,13 +99,37 @@ When adding ingredients, you MUST use only these valid units:
 - Volume: ml, L, cups, tbsp, tsp
 - Count: pieces
 
-Valid categories are:
-- Produce (fruits, vegetables)
-- Dairy (milk, cheese, eggs, yogurt)
-- Meat (all proteins including bacon, chicken, beef, fish)
-- Pantry (grains, canned goods, dry ingredients)
-- Spices (seasonings, herbs, salt, pepper)
-- Other (anything that doesn't fit above categories)
+You can create any category that makes sense for organizing ingredients. Be thoughtful and specific with categories. Examples:
+
+COMMON CATEGORIES:
+- Produce (fruits, vegetables, fresh herbs)
+- Dairy (milk, cheese, eggs, yogurt, butter, cream)
+- Meat (chicken, beef, pork, fish, seafood)
+- Pantry (grains, pasta, rice, flour, dry goods)
+- Spices (seasonings, dried herbs, salt, pepper, spice blends)
+- Condiments (ketchup, mustard, hot sauce, BBQ sauce)
+- Sauces (soy sauce, worcestershire, oyster sauce, tomato sauce)
+- Oils (olive oil, sesame oil, vegetable oil)
+- Vinegars (balsamic, white wine, rice vinegar)
+- Beverages (juices, sodas, wine, coffee, tea)
+- Baking (baking powder, vanilla, chocolate chips)
+- Frozen (frozen vegetables, ice cream, frozen meals)
+- Snacks (chips, crackers, nuts)
+
+CATEGORY ASSIGNMENT RULES:
+- Be specific and logical with categorization
+- Create granular categories when it makes sense (separate "Oils" from "Vinegars" rather than lumping into "Pantry")
+- When users provide structured lists with categories, follow their organization exactly
+- Fresh herbs go in "Produce", dried herbs/spices go in "Spices"
+- Group similar items together (all vinegars in "Vinegars", all oils in "Oils")
+
+EMOJI ASSIGNMENT - IMPORTANT:
+You MUST include appropriate emojis for both ingredients and categories:
+- Choose the most fitting emoji for each ingredient (🍎 for apple, 🥛 for milk, 🌶️ for chili, etc.)
+- Choose emojis for categories that represent the group (🥬 for Produce, 🥛 for Dairy, etc.)
+- Be creative and match emojis to the actual items (🧄 for garlic, 🥓 for bacon, 🍯 for honey)
+- For custom categories, choose appropriate emojis (🥤 for Beverages, 🍿 for Snacks)
+- If unsure, use related food emojis rather than generic ones
 
 INGREDIENT DEFAULTS - IMPORTANT:
 When users ask to add ingredients without specifying quantity/details, ALWAYS use sensible defaults and add them immediately. DO NOT ask for clarification - just add with reasonable defaults:
@@ -152,7 +166,7 @@ For multiple ingredients (ALWAYS USE THIS FOR 2+ ITEMS):
       "function": {
         "name": "add_ingredients_batch",
         "arguments": {
-          "ingredients": "[{\\"name\\":\\"chicken\\",\\"quantity\\":1,\\"unit\\":\\"pieces\\",\\"category\\":\\"Meat\\"},{\\"name\\":\\"apples\\",\\"quantity\\":3,\\"unit\\":\\"pieces\\",\\"category\\":\\"Produce\\"},{\\"name\\":\\"bacon\\",\\"quantity\\":200,\\"unit\\":\\"g\\",\\"category\\":\\"Meat\\"}]"
+          "ingredients": "[{\\"name\\":\\"chicken\\",\\"quantity\\":1,\\"unit\\":\\"pieces\\",\\"category\\":\\"Meat\\",\\"emoji\\":\\"🍗\\",\\"categoryEmoji\\":\\"🥩\\"},{\\"name\\":\\"apples\\",\\"quantity\\":3,\\"unit\\":\\"pieces\\",\\"category\\":\\"Produce\\",\\"emoji\\":\\"🍎\\",\\"categoryEmoji\\":\\"🥬\\"},{\\"name\\":\\"bacon\\",\\"quantity\\":200,\\"unit\\":\\"g\\",\\"category\\":\\"Meat\\",\\"emoji\\":\\"🥓\\",\\"categoryEmoji\\":\\"🥩\\"}]"
         }
       }
     }
@@ -171,7 +185,9 @@ For single ingredient ONLY (use only when adding exactly 1 item):
           "name": "tomatoes",
           "quantity": 3,
           "unit": "pieces",
-          "category": "Produce"
+          "category": "Produce",
+          "emoji": "🍅",
+          "categoryEmoji": "🥬"
         }
       }
     }
@@ -232,92 +248,39 @@ Remember: You have access to the user's current ingredient inventory with quanti
 ''';
   }
 
+  // Model switching method
+
+  void switchModel({String? model}) {
+    if (model != null) {
+      _openRouterService.setModel(model);
+      _logger.log(
+        LogLevel.info,
+        'Chatbot',
+        'Switched to model: $model',
+        {'model_id': _openRouterService.currentModel},
+      );
+    }
+  }
+
   Future<ChatMessage> sendMessage(
     String userMessage,
     List<Ingredient> currentInventory,
   ) async {
-    if (_model == null) {
-      await initialize();
-    }
-
-    try {
-      await _logger.log(LogLevel.debug, 'Chatbot', 'Sending message', {
-        'user_message': userMessage,
-        'inventory_count': currentInventory.length,
-      });
-
-      final userChatMessage = ChatMessage.userMessage(userMessage);
-      _conversationHistory.add(userChatMessage);
-
-      final prompt = _buildConversationalPrompt(userMessage, currentInventory);
-
-      final content = [Content.text(prompt)];
-      final response = await _model!.generateContent(content);
-
-      if (response.text == null || response.text!.isEmpty) {
-        await _logger.log(LogLevel.error, 'Chatbot', 'Empty response from AI');
-        throw Exception('No response from AI model');
-      }
-
-      // Check for tool calls in the response
-      final toolCalls = _toolExecutor.parseToolCallsFromResponse(
-        response.text!,
-      );
-      String finalResponse = response.text!;
-      final toolResults = <ToolResult>[];
-
-      if (toolCalls.isNotEmpty) {
-        await _logger.log(
-          LogLevel.info,
-          'Chatbot',
-          'Found ${toolCalls.length} tool calls in response',
-        );
-
-        // Execute tool calls
-        final results = await _toolExecutor.executeToolCalls(toolCalls);
-        toolResults.addAll(results);
-
-        // Build enhanced response with tool results
-        finalResponse = _buildResponseWithToolResults(
-          response.text!,
-          toolResults,
-        );
-      }
-
-      final botMessage = ChatMessage.botMessage(
-        finalResponse,
-        metadata: {
-          'inventory_used': currentInventory.map((i) => i.name).toList(),
-          'response_time': DateTime.now().toIso8601String(),
-          'tool_calls': toolCalls.map((tc) => tc.toJson()).toList(),
-          'tool_results': toolResults.map((tr) => tr.toJson()).toList(),
-        },
-      );
-
-      _conversationHistory.add(botMessage);
-
-      await _logger
-          .log(LogLevel.info, 'Chatbot', 'Successfully generated response', {
-            'response_length': finalResponse.length,
-            'conversation_length': _conversationHistory.length,
-            'tool_calls_executed': toolCalls.length,
-          });
-
-      return botMessage;
-    } catch (e) {
+    if (!_openRouterService.isInitialized) {
       await _logger.log(
         LogLevel.error,
         'Chatbot',
-        'Failed to generate response',
-        {'error': e.toString()},
+        'OpenRouter service not available - API key missing',
       );
-
       return ChatMessage.botMessage(
-        "I'm sorry, I'm having trouble responding right now. Please try again in a moment. 😊",
-        metadata: {'error': true, 'error_message': e.toString()},
+        'Sorry, I need an OpenRouter API key to work. Please add OPENROUTER_API_KEY to your .env file.',
+        metadata: {'error': true},
       );
     }
+    
+    return _sendMessageViaOpenRouter(userMessage, currentInventory);
   }
+
 
   String _buildResponseWithToolResults(
     String originalResponse,
@@ -488,11 +451,14 @@ Please respond as Sous Chef, keeping the conversation natural and helpful. Consi
     }
 
     // Add general suggestions
-    suggestions.addAll([
-      "What can I cook for dinner?",
-      "Quick meal ideas",
-      "Healthy recipes",
-    ]);
+    bool showSuggestions = false;
+    if (showSuggestions) {
+      suggestions.addAll([
+        "What can I cook for dinner?",
+        "Quick meal ideas",
+        "Healthy recipes",
+      ]);
+    }
 
     return suggestions.take(3).toList();
   }
@@ -507,6 +473,163 @@ Please respond as Sous Chef, keeping the conversation natural and helpful. Consi
 
   void setConversationHistory(List<ChatMessage> history) {
     _conversationHistory = List.from(history);
+  }
+
+  Future<ChatMessage> _sendMessageViaOpenRouter(
+    String userMessage,
+    List<Ingredient> currentInventory,
+  ) async {
+    try {
+      final userChatMessage = ChatMessage.userMessage(userMessage);
+      _conversationHistory.add(userChatMessage);
+
+      // Get tools in native OpenAI format (no conversion needed!)
+      List<Map<String, dynamic>> tools = [];
+      try {
+        tools = _toolRegistry.getAllTools();
+        await _logger.log(LogLevel.debug, 'Chatbot', 'Tools loaded successfully', {
+          'tool_count': tools.length,
+        });
+      } catch (e) {
+        await _logger.log(LogLevel.error, 'Chatbot', 'Error loading tools: $e');
+        tools = []; // Continue without tools if there's an error
+      }
+
+      // Build prompt with error handling
+      String prompt;
+      try {
+        prompt = _buildConversationalPrompt(userMessage, currentInventory);
+        await _logger.log(LogLevel.debug, 'Chatbot', 'Prompt built successfully', {
+          'prompt_length': prompt.length,
+        });
+      } catch (e) {
+        await _logger.log(LogLevel.error, 'Chatbot', 'Error building prompt: $e');
+        throw Exception('Failed to build conversation prompt: $e');
+      }
+
+      // Get system instruction with error handling
+      String systemInstruction;
+      try {
+        systemInstruction = _getSystemInstruction();
+        await _logger.log(LogLevel.debug, 'Chatbot', 'System instruction built successfully', {
+          'instruction_length': systemInstruction.length,
+        });
+      } catch (e) {
+        await _logger.log(LogLevel.error, 'Chatbot', 'Error building system instruction: $e');
+        systemInstruction = 'You are Sous Chef, a helpful cooking assistant.'; // Fallback
+      }
+
+      await _logger.log(LogLevel.debug, 'Chatbot', 'About to call OpenRouter', {
+        'system_prompt_type': systemInstruction.runtimeType.toString(),
+        'user_message_type': prompt.runtimeType.toString(),
+        'tools_count': tools.length,
+      });
+
+      final response = await _openRouterService.sendMessage(
+        systemPrompt: systemInstruction,
+        userMessage: prompt,
+        tools: tools,
+        maxTokens: 2048,
+      );
+
+      if (!response["success"]) {
+        throw Exception(response["error"] ?? "Unknown OpenRouter error");
+      }
+
+      final toolCalls = <ToolCall>[];
+      if (response["tool_calls"] != null && response["tool_calls"] is List) {
+        for (final toolCall in response["tool_calls"]) {
+          try {
+            final function = toolCall["function"];
+            if (function == null) continue;
+            
+            Map<String, dynamic> arguments = {};
+            
+            if (function["arguments"] != null) {
+              if (function["arguments"] is String) {
+                try {
+                  arguments = jsonDecode(function["arguments"]);
+                } catch (e) {
+                  await _logger.log(
+                    LogLevel.warning, 
+                    'Chatbot', 
+                    'Failed to decode tool arguments as JSON: $e',
+                    {'raw_arguments': function["arguments"]}
+                  );
+                  continue;
+                }
+              } else if (function["arguments"] is Map) {
+                arguments = Map<String, dynamic>.from(function["arguments"]);
+              }
+            }
+
+            final toolName = function["name"];
+            if (toolName != null && toolName is String) {
+              toolCalls.add(
+                ToolCall(toolName: toolName, parameters: arguments),
+              );
+            }
+          } catch (e) {
+            await _logger.log(
+              LogLevel.warning, 
+              'Chatbot', 
+              'Error parsing tool call: $e',
+              {'tool_call': toolCall.toString()}
+            );
+          }
+        }
+      }
+
+      final toolResults = await _toolExecutor.executeToolCalls(toolCalls);
+      
+      // Ensure response content is a string
+      String responseContent = "";
+      if (response["content"] != null) {
+        if (response["content"] is String) {
+          responseContent = response["content"];
+        } else if (response["content"] is List) {
+          // Handle case where content might be a list
+          responseContent = response["content"].join(" ");
+        } else {
+          responseContent = response["content"].toString();
+        }
+      }
+      
+      final finalResponse = _buildResponseWithToolResults(
+        responseContent,
+        toolResults,
+      );
+
+      final botMessage = ChatMessage.botMessage(
+        finalResponse,
+        metadata: {
+          "provider": "openRouter",
+          "model": _openRouterService.currentModel,
+          "tool_calls": toolCalls.map((tc) {
+            try {
+              return tc.toJson();
+            } catch (e) {
+              _logger.log(
+                LogLevel.warning,
+                'Chatbot',
+                'Error serializing tool call: $e',
+              );
+              return {'error': 'serialization_failed'};
+            }
+          }).toList(),
+          "response_tokens": response["usage"]?["total_tokens"],
+        },
+      );
+
+      _conversationHistory.add(botMessage);
+      return botMessage;
+    } catch (e) {
+      await _logger.log(LogLevel.error, "Chatbot", "OpenRouter error: $e");
+      return ChatMessage.botMessage(
+        "Sorry, I'm having trouble connecting to the AI service right now. Please try again in a moment.",
+        metadata: {'error': true, 'error_message': e.toString()},
+      );
+    }
   }
 
   void dispose() {

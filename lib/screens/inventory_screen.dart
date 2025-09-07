@@ -305,20 +305,15 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }
 
   Widget _buildCategoryGrid(InventoryProvider provider) {
-    final categories = IngredientCategory.all;
     final ingredientsByCategory = <String, List<Ingredient>>{};
     
-    // Group ingredients by category
-    for (final category in categories) {
-      ingredientsByCategory[category] = provider.ingredients
-          .where((ingredient) => ingredient.category == category)
-          .toList();
+    // Group ingredients by their actual categories (dynamic)
+    for (final ingredient in provider.ingredients) {
+      ingredientsByCategory.putIfAbsent(ingredient.category, () => []).add(ingredient);
     }
     
-    // Filter out empty categories
-    final nonEmptyCategories = categories
-        .where((category) => ingredientsByCategory[category]!.isNotEmpty)
-        .toList();
+    // Get all non-empty categories (sorted alphabetically)
+    final nonEmptyCategories = ingredientsByCategory.keys.toList()..sort();
     
     if (nonEmptyCategories.isEmpty) {
       return Center(
@@ -386,10 +381,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       color: _getCategoryColor(category).withOpacity(0.2),
                       borderRadius: BorderRadius.circular(30),
                     ),
-                    child: Icon(
-                      _getCategoryIcon(category),
-                      size: 30,
-                      color: _getCategoryColor(category),
+                    child: Center(
+                      child: Text(
+                        ingredients.first.categoryEmoji,
+                        style: const TextStyle(fontSize: 30),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),

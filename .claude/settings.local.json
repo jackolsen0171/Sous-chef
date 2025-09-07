@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(cd:*)",
+      "Bash(flutter analyze:*)",
+      "Read(//var/folders/h7/xk5qjr4n7951h6pvbhjmsq900000gn/T/TemporaryItems/NSIRD_screencaptureui_ePUjQR/**)"
     ],
     "deny": [],
     "ask": []

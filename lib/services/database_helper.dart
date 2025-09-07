@@ -22,7 +22,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -36,6 +36,8 @@ class DatabaseHelper {
         quantity REAL NOT NULL,
         unit TEXT NOT NULL,
         category TEXT NOT NULL,
+        emoji TEXT DEFAULT '🍽️',
+        categoryEmoji TEXT DEFAULT '📦',
         expiryDate TEXT,
         createdAt TEXT NOT NULL
       )
@@ -88,7 +90,12 @@ class DatabaseHelper {
         )
       ''');
     }
-  }
+    
+    if (oldVersion < 3) {
+      // Add emoji columns to ingredients table
+      await db.execute("ALTER TABLE ingredients ADD COLUMN emoji TEXT DEFAULT '🍽️'");
+      await db.execute("ALTER TABLE ingredients ADD COLUMN categoryEmoji TEXT DEFAULT '📦'");
+    }  }
 
   Future<int> insertIngredient(Ingredient ingredient) async {
     final db = await database;

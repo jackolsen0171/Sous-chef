@@ -313,7 +313,7 @@ class ToolExecutor {
 
   List<ToolCall> _parseNaturalLanguageToolCalls(String response) {
     final toolCalls = <ToolCall>[];
-    final availableTools = _toolRegistry.getAllTools();
+    final availableToolNames = _toolRegistry.getToolNames();
 
     _logger.log(
       LogLevel.debug,
@@ -323,17 +323,18 @@ class ToolExecutor {
         'response_excerpt': response.length > 200
             ? '${response.substring(0, 200)}...'
             : response,
+        'available_tools': availableToolNames,
       },
     );
 
     // Look for patterns like "I'll add [ingredient] to your inventory"
-    for (final tool in availableTools) {
-      final calls = _parseToolFromNaturalLanguage(response, tool);
+    for (final toolName in availableToolNames) {
+      final calls = _parseToolFromNaturalLanguage(response, toolName);
       if (calls.isNotEmpty) {
         _logger.log(
           LogLevel.debug,
           'ToolExecutor',
-          'Found ${calls.length} calls for ${tool.name}',
+          'Found ${calls.length} calls for $toolName',
         );
         for (final call in calls) {
           _logger.log(LogLevel.debug, 'ToolExecutor', 'Tool call details', {
@@ -390,25 +391,14 @@ class ToolExecutor {
     return true;
   }
 
-  List<ToolCall> _parseToolFromNaturalLanguage(String response, AITool tool) {
+  List<ToolCall> _parseToolFromNaturalLanguage(String response, String toolName) {
     final toolCalls = <ToolCall>[];
 
-    switch (tool.name) {
+    switch (toolName) {
       case 'add_ingredient':
         toolCalls.addAll(_parseAddIngredientFromText(response));
         break;
-      case 'add_ingredients_batch':
-        toolCalls.addAll(_parseAddIngredientsBatchFromText(response));
-        break;
-      case 'delete_ingredient':
-        toolCalls.addAll(_parseDeleteIngredientFromText(response));
-        break;
-      case 'update_ingredient_quantity':
-        toolCalls.addAll(_parseUpdateQuantityFromText(response));
-        break;
-      case 'list_ingredients':
-        toolCalls.addAll(_parseListIngredientsFromText(response));
-        break;
+      // Note: Only add_ingredient tool exists now - others removed per refactor
     }
 
     return toolCalls;
@@ -522,10 +512,14 @@ class ToolExecutor {
               ToolCall(
                 toolName: 'add_ingredient',
                 parameters: {
-                  'name': name,
-                  'quantity': quantity,
-                  'unit': unit,
-                  'category': category,
+                  'ingredients': [
+                    {
+                      'name': name,
+                      'quantity': quantity,
+                      'unit': unit,
+                      'category': category,
+                    }
+                  ],
                 },
               ),
             );
@@ -678,33 +672,19 @@ class ToolExecutor {
       }
     }
 
-    // If we found multiple valid ingredients, create a batch tool call
-    if (ingredients.length >= 2) {
+    // Now use the single add_ingredient tool with batch support
+    if (ingredients.isNotEmpty) {
       _logger.log(
         LogLevel.info,
         'ToolExecutor',
-        'Creating batch add tool call for ${ingredients.length} ingredients',
+        'Creating single add_ingredient tool call with ${ingredients.length} ingredients',
       );
       
       toolCalls.add(
         ToolCall(
-          toolName: 'add_ingredients_batch',
-          parameters: {
-            'ingredients': jsonEncode(ingredients),
-          },
-        ),
-      );
-    } else if (ingredients.length == 1) {
-      // If only one ingredient, use single add instead
-      final ing = ingredients.first;
-      toolCalls.add(
-        ToolCall(
           toolName: 'add_ingredient',
           parameters: {
-            'name': ing['name'],
-            'quantity': ing['quantity'],
-            'unit': ing['unit'],
-            'category': ing['category'],
+            'ingredients': ingredients,
           },
         ),
       );
@@ -713,80 +693,6 @@ class ToolExecutor {
     return toolCalls;
   }
 
-  List<ToolCall> _parseDeleteIngredientFromText(String text) {
-    final toolCalls = <ToolCall>[];
-
-    // More specific patterns for delete operations
-    final patterns = [
-      // Pattern 1: "delete/remove all ingredients/inventory"
-      RegExp(
-        r"(?:delete|remove|clear|empty)\s+(?:all\s+)?(?:my\s+)?(?:ingredients|inventory)",
-        caseSensitive: false,
-      ),
-      // Pattern 2: "delete/remove the [specific ingredient]" - with word boundaries
-      RegExp(
-        r"(?:delete|remove|get rid of)\s+(?:the\s+)?([a-zA-Z]{2,}(?:\s+[a-zA-Z]{2,})*)\b",
-        caseSensitive: false,
-      ),
-      // Pattern 3: "delete [ingredient] from inventory"
-      RegExp(
-        r"(?:delete|remove)\s+([a-zA-Z]{2,}(?:\s+[a-zA-Z]{2,})*)\s+from\s+(?:my\s+)?inventory",
-        caseSensitive: false,
-      ),
-    ];
-
-    // Check for "delete all" pattern first
-    if (patterns[0].hasMatch(text)) {
-      // Don't return a tool call for "delete all" - this needs special handling
-      // The AI should list ingredients first or confirm the action
-      _logger.log(
-        LogLevel.warning,
-        'ToolExecutor',
-        'Delete all inventory requested but not executing - needs confirmation',
-      );
-      return toolCalls;
-    }
-
-    // Check for specific ingredient deletion patterns - but only take the first match
-    // to prevent duplicate deletions
-    final foundIngredients = <String>{};
-
-    for (int i = 1; i < patterns.length; i++) {
-      final matches = patterns[i].allMatches(text);
-      for (final match in matches) {
-        if (match.groupCount >= 1) {
-          final name = match.group(1)?.trim().toLowerCase();
-
-          // Validate the ingredient name and check for duplicates
-          if (name != null &&
-              name.length > 1 &&
-              !_isSuspiciousIngredientName(name) &&
-              !foundIngredients.contains(name)) {
-            foundIngredients.add(name);
-            toolCalls.add(
-              ToolCall(
-                toolName: 'delete_ingredient',
-                parameters: {'name': name},
-              ),
-            );
-
-            // Only take the first valid match to prevent multiple calls
-            // for the same intention expressed in different ways
-            if (toolCalls.length >= 1) {
-              _logger.log(
-                LogLevel.debug,
-                'ToolExecutor',
-                'Found delete ingredient match, stopping to prevent duplicates',
-              );
-              return toolCalls;
-            }
-          }
-        }
-      }
-    }
-
-    return toolCalls;
-  }
 
   bool _isSuspiciousIngredientName(String name) {
     // Filter out suspicious patterns that might be from incomplete streaming
@@ -801,63 +707,7 @@ class ToolExecutor {
     return false;
   }
 
-  List<ToolCall> _parseUpdateQuantityFromText(String text) {
-    final toolCalls = <ToolCall>[];
 
-    // Pattern: "update [ingredient] to [quantity]"
-    final updatePattern = RegExp(
-      r"(?:update|change)\s+([a-zA-Z\s]+)\s+(?:to|quantity to)\s+(\d+(?:\.\d+)?)",
-      caseSensitive: false,
-    );
-
-    final matches = updatePattern.allMatches(text);
-    for (final match in matches) {
-      final name = match.group(1)?.trim().toLowerCase();
-      final quantity = double.tryParse(match.group(2) ?? '');
-
-      if (name != null && name.isNotEmpty && quantity != null) {
-        toolCalls.add(
-          ToolCall(
-            toolName: 'update_ingredient_quantity',
-            parameters: {'name': name, 'quantity': quantity},
-          ),
-        );
-      }
-    }
-
-    return toolCalls;
-  }
-
-  List<ToolCall> _parseListIngredientsFromText(String text) {
-    final toolCalls = <ToolCall>[];
-
-    // Pattern: "show/list [ingredients/inventory]"
-    if (RegExp(
-      r"(?:show|list|what(?:'s| is))\s+(?:my\s+)?(?:inventory|ingredients)",
-      caseSensitive: false,
-    ).hasMatch(text)) {
-      final parameters = <String, dynamic>{};
-
-      // Check for category filter
-      for (final category in ['produce', 'dairy', 'meat', 'pantry', 'spices']) {
-        if (text.toLowerCase().contains(category)) {
-          parameters['category'] = category;
-          break;
-        }
-      }
-
-      // Check for expiring filter
-      if (RegExp(r"expir(?:ing|e)|soon", caseSensitive: false).hasMatch(text)) {
-        parameters['expiring_only'] = true;
-      }
-
-      toolCalls.add(
-        ToolCall(toolName: 'list_ingredients', parameters: parameters),
-      );
-    }
-
-    return toolCalls;
-  }
 
   String? _mapUnit(String unit) {
     final unitMap = {
