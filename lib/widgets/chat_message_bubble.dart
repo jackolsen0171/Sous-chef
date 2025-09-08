@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import '../models/chat_message.dart';
 import 'tool_call_bubble.dart';
 
@@ -156,14 +157,36 @@ class ChatMessageBubble extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      message.content,
-                      style: TextStyle(
-                        color: hasError 
-                            ? Colors.red.shade700 
-                            : Colors.black87,
-                        fontSize: 16,
-                        height: 1.4,
+                    MarkdownBody(
+                      data: message.content,
+                      styleSheet: MarkdownStyleSheet(
+                        p: TextStyle(
+                          color: hasError 
+                              ? Colors.red.shade700 
+                              : Colors.black87,
+                          fontSize: 16,
+                          height: 1.4,
+                        ),
+                        h2: TextStyle(
+                          color: hasError 
+                              ? Colors.red.shade700 
+                              : Colors.black87,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        h3: TextStyle(
+                          color: hasError 
+                              ? Colors.red.shade700 
+                              : Colors.black87,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        strong: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: hasError 
+                              ? Colors.red.shade700 
+                              : Colors.black87,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 4),
